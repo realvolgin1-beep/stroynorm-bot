@@ -5,6 +5,8 @@ from pathlib import Path
 
 from pypdf import PdfReader
 
+from app.catalog import documents as catalog_documents
+
 
 SECTION_PATTERN = re.compile(r"(?m)^\s*((?:\d+\.)+\d+|\d+\.\d+)\s+")
 
@@ -39,6 +41,15 @@ def read_document(path: Path):
         yield None, path.read_text(encoding="utf-8", errors="ignore")
 
 
+def metadata_for(path: Path) -> tuple[str | None, str | None]:
+    compact_name = re.sub(r"[^0-9a-zа-я]", "", path.stem.lower().replace("ё", "е"))
+    for document in catalog_documents():
+        compact_code = re.sub(r"[^0-9a-zа-я]", "", document["code"].lower().replace("ё", "е"))
+        if compact_code and compact_code in compact_name:
+            return document.get("official_url"), document.get("edition")
+    return None, None
+
+
 def ingest(source: Path, database: Path) -> tuple[int, int]:
     database.parent.mkdir(parents=True, exist_ok=True)
     documents = [p for p in source.rglob("*") if p.suffix.lower() in {".pdf", ".txt", ".md"}]
@@ -46,16 +57,20 @@ def ingest(source: Path, database: Path) -> tuple[int, int]:
     with sqlite3.connect(database) as connection:
         connection.execute("DROP TABLE IF EXISTS chunks")
         connection.execute(
-            "CREATE VIRTUAL TABLE chunks USING fts5(document, page UNINDEXED, section UNINDEXED, text, tokenize='unicode61')"
+            "CREATE VIRTUAL TABLE chunks USING fts5("
+            "document, page UNINDEXED, section UNINDEXED, text, "
+            "source_url UNINDEXED, edition UNINDEXED, tokenize='unicode61')"
         )
         for path in documents:
+            source_url, edition = metadata_for(path)
             for page, text in read_document(path):
                 for fragment in chunks(text):
                     if len(fragment) < 80:
                         continue
                     connection.execute(
-                        "INSERT INTO chunks(document, page, section, text) VALUES (?, ?, ?, ?)",
-                        (path.stem, page, section_for(fragment), fragment),
+                        "INSERT INTO chunks(document, page, section, text, source_url, edition) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        (path.stem, page, section_for(fragment), fragment, source_url, edition),
                     )
                     inserted += 1
         connection.commit()
