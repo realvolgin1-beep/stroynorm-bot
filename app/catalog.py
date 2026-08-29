@@ -19,9 +19,12 @@ def catalog_summary(category: str | None = None) -> str:
         "acceptance": "Контроль и приёмка",
         "maintenance": "Эксплуатация и содержание",
         "rosavtodor": "Минтранс и Росавтодор",
+        "measurements": "Измерения и допустимые отклонения",
+        "pavement": "Дорожные одежды и покрытия",
     }
     selected = [doc for doc in documents() if not category or doc["category"] == category]
     lines = [f"📚 {names.get(category, 'Реестр нормативных документов')} — {len(selected)} документов"]
     for doc in selected:
-        lines.append(f"\n• {doc['code']}\n{doc['title']}\nСтатус: {doc['status']}; {doc['edition']}")
+        scope = f"\nПрименение: {doc['scope']}" if doc.get("scope") else ""
+        lines.append(f"\n• {doc['code']}\n{doc['title']}\nСтатус: {doc['status']}; {doc['edition']}{scope}")
     return "\n".join(lines)
