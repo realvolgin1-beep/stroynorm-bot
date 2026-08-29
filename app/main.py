@@ -16,8 +16,8 @@ dispatcher = create_dispatcher(settings)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if settings.public_url:
-        webhook_url = f"{settings.public_url.rstrip('/')}/telegram/webhook"
+    if settings.effective_public_url:
+        webhook_url = f"{settings.effective_public_url.rstrip('/')}/telegram/webhook"
         await bot.set_webhook(webhook_url, secret_token=settings.webhook_secret or None)
     yield
     await bot.session.close()
