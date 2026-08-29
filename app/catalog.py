@@ -1,4 +1,5 @@
 import json
+import re
 from functools import lru_cache
 from pathlib import Path
 
@@ -27,4 +28,40 @@ def catalog_summary(category: str | None = None) -> str:
     for doc in selected:
         scope = f"\nПрименение: {doc['scope']}" if doc.get("scope") else ""
         lines.append(f"\n• {doc['code']}\n{doc['title']}\nСтатус: {doc['status']}; {doc['edition']}{scope}")
+    return "\n".join(lines)
+
+
+def search_catalog(query: str, limit: int = 8) -> list[dict[str, str]]:
+    normalized = query.lower().replace("ё", "е")
+    terms = re.findall(r"[0-9a-zа-я.-]{2,}", normalized)
+    aliases = {
+        "мост": ["мост", "труб", "пролет", "опор", "сооружен"],
+        "дорог": ["дорог", "покрыт", "одежд", "полотн"],
+        "знак": ["знак", "движен", "размет", "светофор"],
+        "допуск": ["отклон", "геометр", "контрол", "измерен", "приемк"],
+        "асфальт": ["асфальт", "покрыт", "смес"],
+    }
+    expanded = list(terms)
+    for term in terms:
+        for key, values in aliases.items():
+            if term.startswith(key):
+                expanded.extend(values)
+    scored = []
+    for doc in documents():
+        haystack = " ".join(str(value) for value in doc.values()).lower().replace("ё", "е")
+        score = sum(3 if term in doc["code"].lower() else 1 for term in expanded if term in haystack)
+        if score:
+            scored.append((score, doc))
+    scored.sort(key=lambda item: (-item[0], item[1]["code"]))
+    return [doc for _, doc in scored[:limit]]
+
+
+def format_catalog_hits(hits: list[dict[str, str]]) -> str:
+    lines = ["Нашёл подходящие нормативные документы:"]
+    for doc in hits:
+        lines.append(f"\n• {doc['code']} — {doc['title']}\nСтатус: {doc['status']}")
+        if doc.get("scope"):
+            lines.append(f"Применение: {doc['scope']}")
+        lines.append(f"Источник: {doc['official_url']}")
+    lines.append("\nУточните нужную работу или параметр: установка знака, ровность, уклон, сцепление, опора, пролетное строение, приемка и т. п.")
     return "\n".join(lines)
