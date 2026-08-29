@@ -17,12 +17,19 @@ SYSTEM_PROMPT = """Ты — справочный помощник по стро�
 «Перед применением проверьте актуальность официальной редакции документа.»"""
 
 
+def _section_label(section: str) -> str:
+    normalized = section.strip().lower()
+    if normalized.startswith(("статья", "раздел", "таблица", "приложение", "пункт", "п.")):
+        return section.strip()
+    return f"пункт {section.strip()}"
+
+
 def _context(hits: list[SearchHit]) -> str:
     blocks = []
     for index, hit in enumerate(hits, 1):
         location = f"стр. {hit.page}" if hit.page else "страница не определена"
         if hit.section:
-            location += f", пункт/раздел {hit.section}"
+            location += f", {_section_label(hit.section)}"
         source = f"\nОфициальный источник: {hit.source_url}" if hit.source_url else ""
         blocks.append(f"Фрагмент {index}\nДокумент: {hit.document}\n{location}{source}\n{hit.text}")
     return "\n\n".join(blocks)
@@ -60,7 +67,7 @@ def local_answer(question: str, hits: list[SearchHit]) -> str:
         seen.add(fingerprint)
         citation = hit.document
         if hit.section:
-            citation += f", пункт {hit.section}"
+            citation += f", {_section_label(hit.section)}"
         if hit.page:
             citation += f", стр. {hit.page}"
         block = f"\n• {excerpt}\n[{citation}]"
