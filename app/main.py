@@ -6,7 +6,7 @@ from aiogram.types import Update
 from fastapi import FastAPI, Header, HTTPException, Request
 
 from app.bot import create_dispatcher
-from app.catalog import documents
+from app.catalog import catalog_scope_count, documents
 from app.config import get_settings
 from app.requirements import requirement_values_count
 
@@ -33,8 +33,9 @@ async def health() -> dict[str, str | int]:
     return {
         "status": "ok",
         "documents": len(documents()),
+        "searchable_scopes": catalog_scope_count(),
         "requirements": requirement_values_count(),
-        "search": "local-hybrid",
+        "search": "local-hybrid-grounded",
         "release": "2026-08-29",
     }
 

@@ -20,3 +20,11 @@ def test_fts_query_adds_topic_terms():
 
     assert '"кладк"*' in query
     assert '"конструкц"*' in query
+
+
+def test_bns_abbreviation_expands_to_bored_pile_topic():
+    profile = analyze_query("допуск каркаса БНС")
+
+    assert "буровая" in profile.tokens
+    assert "свая" in profile.tokens
+    assert "geotechnics" in profile.categories

@@ -42,3 +42,12 @@ def test_search_understands_bridge_word_form_and_returns_source(tmp_path):
     assert hits
     assert hits[0].section == "7.12"
     assert hits[0].source_url == "https://protect.gost.ru/sp/details/example"
+
+
+def test_search_routes_question_without_sqlite_database():
+    hits = search("/missing/stroynorm.db", "толщина штукатурки")
+
+    assert hits
+    assert hits[0].kind == "catalog"
+    assert hits[0].document.startswith("СП 71.13330.2017")
+    assert hits[0].source_url

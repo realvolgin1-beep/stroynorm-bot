@@ -5,6 +5,7 @@ from functools import lru_cache
 from pathlib import Path
 from urllib.parse import quote_plus
 
+from app.document_topics import DOCUMENT_SEARCH_TERMS
 from app.smart_search import analyze_query, normalize, stem_word, text_relevance, tokenize
 
 
@@ -34,7 +35,7 @@ CATEGORY_NAMES = {
 }
 
 DOCUMENT_PRIORITIES = {
-    "bridges": ("СП 46.13330.2012", "СП 35.13330.2011", "ГОСТ 33384-2015", "ГОСТ Р 59618-2021", "СП 79.13330.2012"),
+    "bridges": ("СП 35.13330.2011", "ГОСТ 33384-2015", "СП 46.13330.2012", "ГОСТ Р 59618-2021", "СП 79.13330.2012"),
     "roads": ("СП 78.13330.2012", "СП 34.13330.2021"),
     "traffic": ("ГОСТ Р 52289-2019", "ГОСТ 32758-2014", "ГОСТ Р 52290-2004"),
     "measurements": ("ГОСТ Р 59120-2021", "ГОСТ Р 58945-2020", "ГОСТ 33383-2015", "ГОСТ Р 56925-2016"),
@@ -76,15 +77,23 @@ def catalog_overview() -> str:
     return "\n".join(lines)
 
 
+def catalog_scope_count() -> int:
+    return sum(bool(document.get("scope")) for document in documents())
+
+
 def search_catalog(query: str, limit: int = 8) -> list[dict]:
     profile = analyze_query(query)
+    normalized_query = normalize(query)
     compact_query = re.sub(r"[^0-9a-zа-яё]", "", normalize(query))
     scored = []
     for doc in documents():
+        search_terms = DOCUMENT_SEARCH_TERMS.get(doc["code"], ())
         haystack = " ".join(
             str(doc.get(field, ""))
             for field in ("code", "title", "scope", "category")
         )
+        if search_terms:
+            haystack += " " + " ".join(search_terms)
         compact_code = re.sub(r"[^0-9a-zа-яё]", "", normalize(doc["code"]))
         exact_compact_code = len(compact_query) >= 4 and compact_query in compact_code
         if not exact_compact_code and not profile.categories and len(profile.stems) > 1:
@@ -110,16 +119,43 @@ def search_catalog(query: str, limit: int = 8) -> list[dict]:
         if exact_compact_code:
             score += 16.0
         if doc["category"] in profile.categories:
-            score += 5.0
+            score += 2.4
+
+        topic_scores = []
+        for term in search_terms:
+            normalized_term = normalize(term)
+            term_stems = tuple(dict.fromkeys(stem_word(token) for token in tokenize(term)))
+            matching_stems = sum(
+                1
+                for expected in term_stems
+                if any(
+                    expected == actual
+                    or (
+                        len(expected) >= 4
+                        and len(actual) >= 4
+                        and (expected.startswith(actual) or actual.startswith(expected))
+                    )
+                    for actual in profile.stems
+                )
+            )
+            if normalized_term in normalized_query:
+                topic_scores.append(12.0 + len(term_stems))
+            elif term_stems and matching_stems == len(term_stems):
+                topic_scores.append(8.0 + matching_stems)
+            elif matching_stems >= 2:
+                topic_scores.append(3.0 + matching_stems)
+        if topic_scores:
+            score += max(topic_scores) + min(4.0, max(0, len(topic_scores) - 1) * 0.6)
+
         if not profile.has_document_number:
             for category in profile.categories:
                 priorities = DOCUMENT_PRIORITIES.get(category, ())
                 if doc["code"] in priorities:
-                    score += 3.2 / (priorities.index(doc["code"]) + 1)
+                    score += 1.4 / (priorities.index(doc["code"]) + 1)
         if score >= 0.75:
             scored.append((score, doc))
     scored.sort(key=lambda item: (-item[0], item[1]["code"]))
-    return [doc for _, doc in scored[:limit]]
+    return [{**doc, "_search_score": score} for score, doc in scored[:limit]]
 
 
 def format_catalog_hits(hits: list[dict]) -> str:

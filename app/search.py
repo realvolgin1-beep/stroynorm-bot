@@ -2,7 +2,7 @@ import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 
-from app.catalog import documents
+from app.catalog import documents, search_catalog
 from app.smart_search import analyze_query, fts_query, text_relevance
 
 
@@ -15,6 +15,9 @@ class SearchHit:
     score: float
     source_url: str | None = None
     edition: str | None = None
+    kind: str = "clause"
+    category: str | None = None
+    status: str | None = None
 
 
 def _query_terms(question: str) -> str:
@@ -32,7 +35,7 @@ def _catalog_metadata(document: str) -> tuple[str | None, str | None]:
     return None, None
 
 
-def search(database_path: str, question: str, limit: int = 7) -> list[SearchHit]:
+def _search_database(database_path: str, question: str, limit: int) -> list[SearchHit]:
     path = Path(database_path)
     if not path.exists():
         return []
@@ -80,3 +83,50 @@ def search(database_path: str, question: str, limit: int = 7) -> list[SearchHit]
         )
     hits.sort(key=lambda hit: hit.score, reverse=True)
     return hits[:limit]
+
+
+def _catalog_search_hits(question: str, limit: int) -> list[SearchHit]:
+    hits = []
+    for index, item in enumerate(search_catalog(question, limit=limit)):
+        scope = item.get("scope") or item["title"]
+        hits.append(
+            SearchHit(
+                document=f"{item['code']} «{item['title']}»",
+                page=None,
+                section="область применения",
+                text=scope,
+                score=float(item.get("_search_score", limit - index)),
+                source_url=item.get("official_url"),
+                edition=item.get("edition"),
+                kind="catalog",
+                category=item.get("category"),
+                status=item.get("status"),
+            )
+        )
+    return hits
+
+
+def search(database_path: str, question: str, limit: int = 7) -> list[SearchHit]:
+    """Search verified clauses first and document scopes second.
+
+    Catalog scopes are bundled with the application, so broad construction
+    routing works on an ephemeral free Render instance even when a separate
+    SQLite corpus has not been mounted.  A catalog hit is explicitly marked and
+    must never be formatted as a numerical requirement.
+    """
+
+    clause_hits = _search_database(database_path, question, limit)
+    catalog_hits = _catalog_search_hits(question, limit)
+    if not clause_hits:
+        return catalog_hits[:limit]
+
+    result = list(clause_hits)
+    normalized_clause_documents = " ".join(hit.document.lower() for hit in clause_hits)
+    for hit in catalog_hits:
+        code = hit.document.split(" «", 1)[0].lower()
+        if code in normalized_clause_documents:
+            continue
+        result.append(hit)
+        if len(result) >= limit:
+            break
+    return result[:limit]

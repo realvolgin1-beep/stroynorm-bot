@@ -31,3 +31,28 @@ def test_local_answer_preserves_article_label():
 
     assert "Статья 6" in answer
     assert "пункт Статья" not in answer
+
+
+def test_catalog_answer_links_document_and_does_not_invent_tolerance():
+    answer = local_answer(
+        "допустимая толщина штукатурки",
+        [
+            SearchHit(
+                document="СП 71.13330.2017 «Изоляционные и отделочные покрытия»",
+                page=None,
+                section="область применения",
+                text="Производство и контроль штукатурных работ.",
+                score=20.0,
+                source_url="https://protect.gost.ru/sp/details/example",
+                edition="действующая редакция",
+                kind="catalog",
+                category="finishes",
+                status="действует",
+            )
+        ],
+    )
+
+    assert "СП 71.13330.2017" in answer
+    assert "https://protect.gost.ru/sp/details/example" in answer
+    assert "Точное значение и номер пункта не называю" in answer
+    assert "±" not in answer
