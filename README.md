@@ -13,7 +13,7 @@ Telegram-бот для поиска по строительным СП и ГОС
 ## Переменные окружения
 
 - `TELEGRAM_BOT_TOKEN` — токен от BotFather;
-- `OPENAI_API_KEY` — ключ OpenAI API;
+- `OPENAI_API_KEY` — необязательный ключ OpenAI API; без него бот показывает найденные фрагменты;
 - `OPENAI_MODEL` — модель, по умолчанию `gpt-4.1-mini`;
 - `PUBLIC_URL` — публичный адрес Render, например `https://stroynorm-bot.onrender.com`;
 - `WEBHOOK_SECRET` — произвольная длинная случайная строка;
