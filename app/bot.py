@@ -6,7 +6,15 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from app.answers import answer_question
-from app.catalog import catalog_summary, documents, format_catalog_hits, search_catalog
+from app.catalog import (
+    catalog_overview,
+    catalog_sources,
+    catalog_summary,
+    documents,
+    format_catalog_hits,
+    format_no_results,
+    search_catalog,
+)
 from app.config import Settings
 from app.search import search
 
@@ -18,6 +26,8 @@ MENU = ReplyKeyboardMarkup(
         [KeyboardButton(text="🔎 Найти норму"), KeyboardButton(text="📚 Документы")],
         [KeyboardButton(text="🌉 Мосты"), KeyboardButton(text="🛣 Дороги и знаки")],
         [KeyboardButton(text="📐 Допуски и контроль"), KeyboardButton(text="🧱 Покрытия")],
+        [KeyboardButton(text="🏗 Общестрой"), KeyboardButton(text="🔥 Пожарные нормы")],
+        [KeyboardButton(text="🔧 Инженерные системы"), KeyboardButton(text="🔗 Источники")],
         [KeyboardButton(text="ℹ️ Помощь")],
     ],
     resize_keyboard=True,
@@ -25,8 +35,8 @@ MENU = ReplyKeyboardMarkup(
 
 WELCOME = (
     "Здравствуйте! Я «СтройНорм РФ» — справочник по СП, ГОСТам и документам Росавтодора.\n\n"
-    "Приоритетные темы: автомобильные дороги, мосты, знаки, допуски, контроль и приёмка. "
-    "Задайте вопрос обычным сообщением."
+    "Приоритетные темы: дороги, мосты и общестроительные нормы. "
+    "Бесплатный гибридный поиск понимает обычные вопросы, склонения и частые опечатки."
 )
 
 
@@ -49,7 +59,10 @@ async def help_message(message: Message) -> None:
         "• допустимое отклонение пролётного строения;\n"
         "• требования к опорным частям моста;\n"
         "• высота и боковое расстояние дорожного знака;\n"
-        "• контроль ровности и поперечного уклона дороги."
+        "• контроль ровности и поперечного уклона дороги;\n"
+        "• устройство монолитных железобетонных конструкций;\n"
+        "• ширина эвакуационного выхода.\n\n"
+        "Ответ содержит документ, пункт и страницу, если они есть в загруженном официальном тексте."
     )
 
 
@@ -57,7 +70,7 @@ async def help_message(message: Message) -> None:
 @router.message(Command("search"))
 async def find_prompt(message: Message) -> None:
     await message.answer(
-        "Напишите обозначение или вопрос. Например:\n"
+        "Напишите обозначение или вопрос — платный API для поиска не нужен. Например:\n"
         "• СП 35.13330\n• ГОСТ по обследованию мостов\n"
         "• допустимое отклонение поперечного уклона дороги\n"
         "• установка временных знаков при ремонте"
@@ -67,12 +80,21 @@ async def find_prompt(message: Message) -> None:
 @router.message(Command("documents"))
 @router.message(F.text == "📚 Документы")
 async def about_database(message: Message) -> None:
-    await message.answer(catalog_summary())
+    await message.answer(catalog_overview())
+
+
+@router.message(Command("sources"))
+@router.message(F.text == "🔗 Источники")
+async def sources(message: Message) -> None:
+    await message.answer(catalog_sources())
 
 
 @router.message(Command("stats"))
 async def stats(message: Message) -> None:
-    await message.answer(f"В реестре: {len(documents())} документов. Приоритет: дороги, мосты, знаки, контроль и приёмка.")
+    await message.answer(
+        f"В проверенном реестре: {len(documents())} документов. "
+        "Поиск: бесплатный локальный гибридный — ключ OpenAI не требуется."
+    )
 
 
 @router.message(F.text == "🌉 Мосты")
@@ -95,6 +117,23 @@ async def pavement(message: Message) -> None:
     await message.answer(catalog_summary("pavement"))
 
 
+@router.message(F.text == "🏗 Общестрой")
+async def general_construction(message: Message) -> None:
+    await message.answer(catalog_summary("organization"))
+    await message.answer(catalog_summary("structures"))
+    await message.answer(catalog_summary("geotechnics"))
+
+
+@router.message(F.text == "🔥 Пожарные нормы")
+async def fire_safety(message: Message) -> None:
+    await message.answer(catalog_summary("fire"))
+
+
+@router.message(F.text == "🔧 Инженерные системы")
+async def engineering(message: Message) -> None:
+    await message.answer(catalog_summary("engineering"))
+
+
 @router.message(F.text)
 async def question(message: Message, settings: Settings) -> None:
     text = (message.text or "").strip()
@@ -105,11 +144,11 @@ async def question(message: Message, settings: Settings) -> None:
     if len(text) < 4:
         await message.answer("Введите обозначение документа или более подробный вопрос.")
         return
-    waiting = await message.answer("Ищу норму в базе…")
+    waiting = await message.answer("Ищу по словам, смысловым темам и обозначениям документов…")
     try:
         hits = await asyncio.to_thread(search, settings.database_path, text)
-        if not hits and catalog_hits:
-            response = format_catalog_hits(catalog_hits)
+        if not hits:
+            response = format_catalog_hits(catalog_hits) if catalog_hits else format_no_results(text)
         else:
             response = await answer_question(settings.openai_api_key, settings.openai_model, text, hits)
         await waiting.edit_text(response)
