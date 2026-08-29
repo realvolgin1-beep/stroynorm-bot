@@ -36,6 +36,13 @@ def search_catalog(query: str, limit: int = 8) -> list[dict[str, str]]:
     terms = re.findall(r"[0-9a-zа-я.-]{2,}", normalized)
     aliases = {
         "мост": ["мост", "труб", "пролет", "опор", "сооружен"],
+        "пролет": ["мост", "труб", "пролет", "опор", "сооружен"],
+        "опор": ["мост", "труб", "пролет", "опор", "сооружен"],
+        "усто": ["мост", "труб", "пролет", "опор", "сооружен"],
+        "балк": ["мост", "пролет", "конструкц", "сооружен"],
+        "ферм": ["мост", "пролет", "конструкц", "сооружен"],
+        "ригел": ["мост", "опор", "конструкц", "сооружен"],
+        "деформацион": ["мост", "пролет", "конструкц", "сооружен"],
         "дорог": ["дорог", "покрыт", "одежд", "полотн"],
         "знак": ["знак", "движен", "размет", "светофор"],
         "допуск": ["отклон", "геометр", "контрол", "измерен", "приемк"],
@@ -46,10 +53,27 @@ def search_catalog(query: str, limit: int = 8) -> list[dict[str, str]]:
         for key, values in aliases.items():
             if term.startswith(key):
                 expanded.extend(values)
+    expanded = list(dict.fromkeys(expanded))
+
+    has_document_number = any(re.search(r"\d{4,}", term) for term in terms)
+    bridge_query = any(
+        term.startswith(("мост", "пролет", "опор", "усто", "балк", "ферм", "ригел", "деформацион"))
+        for term in terms
+    )
+    topic_boosts = {}
+    if bridge_query and not has_document_number:
+        topic_boosts = {
+            "СП 35.13330.2011": 8,
+            "ГОСТ 33384-2015": 7,
+            "ГОСТ Р 59618-2021": 4,
+            "СП 79.13330.2012": 3,
+        }
+
     scored = []
     for doc in documents():
         haystack = " ".join(str(value) for value in doc.values()).lower().replace("ё", "е")
         score = sum(3 if term in doc["code"].lower() else 1 for term in expanded if term in haystack)
+        score += topic_boosts.get(doc["code"], 0)
         if score:
             scored.append((score, doc))
     scored.sort(key=lambda item: (-item[0], item[1]["code"]))
