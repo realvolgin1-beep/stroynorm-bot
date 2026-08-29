@@ -35,5 +35,7 @@ def test_masonry_query_finds_masonry_rules():
     assert hits[0]["code"] == "СП 15.13330.2020"
 
 
-def test_unknown_document_number_is_not_invented():
-    assert search_catalog("СП46") == []
+def test_sp46_compact_number_finds_bridge_construction_rules():
+    hits = search_catalog("СП46")
+
+    assert hits[0]["code"] == "СП 46.13330.2012"

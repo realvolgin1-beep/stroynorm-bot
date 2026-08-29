@@ -16,6 +16,7 @@ from app.catalog import (
     search_catalog,
 )
 from app.config import Settings
+from app.requirements import answer_requirement, requirement_values_count
 from app.search import search
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,9 @@ async def help_message(message: Message) -> None:
     await message.answer(
         "Укажите объект, вид работ и нужный параметр. Например:\n"
         "• допустимое отклонение пролётного строения;\n"
+        "• отклонение каркаса буровой сваи;\n"
+        "• высотная отметка верхнего слоя асфальта А16;\n"
+        "• толщина верхнего слоя асфальта по керну;\n"
         "• требования к опорным частям моста;\n"
         "• высота и боковое расстояние дорожного знака;\n"
         "• контроль ровности и поперечного уклона дороги;\n"
@@ -93,6 +97,7 @@ async def sources(message: Message) -> None:
 async def stats(message: Message) -> None:
     await message.answer(
         f"В проверенном реестре: {len(documents())} документов. "
+        f"В отдельной базе: {requirement_values_count()} проверенных численных значений. "
         "Поиск: бесплатный локальный гибридный — ключ OpenAI не требуется."
     )
 
@@ -137,6 +142,10 @@ async def engineering(message: Message) -> None:
 @router.message(F.text)
 async def question(message: Message, settings: Settings) -> None:
     text = (message.text or "").strip()
+    requirement_answer = answer_requirement(text)
+    if requirement_answer:
+        await message.answer(requirement_answer)
+        return
     catalog_hits = search_catalog(text)
     if len(text) < 8 and catalog_hits:
         await message.answer(format_catalog_hits(catalog_hits))

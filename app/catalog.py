@@ -1,4 +1,5 @@
 import json
+import re
 from collections import Counter
 from functools import lru_cache
 from pathlib import Path
@@ -33,10 +34,11 @@ CATEGORY_NAMES = {
 }
 
 DOCUMENT_PRIORITIES = {
-    "bridges": ("СП 35.13330.2011", "ГОСТ 33384-2015", "ГОСТ Р 59618-2021", "СП 79.13330.2012"),
-    "roads": ("СП 34.13330.2021",),
+    "bridges": ("СП 46.13330.2012", "СП 35.13330.2011", "ГОСТ 33384-2015", "ГОСТ Р 59618-2021", "СП 79.13330.2012"),
+    "roads": ("СП 78.13330.2012", "СП 34.13330.2021"),
     "traffic": ("ГОСТ Р 52289-2019", "ГОСТ 32758-2014", "ГОСТ Р 52290-2004"),
-    "measurements": ("ГОСТ Р 58945-2020", "ГОСТ 33383-2015", "ГОСТ Р 56925-2016"),
+    "measurements": ("ГОСТ Р 59120-2021", "ГОСТ Р 58945-2020", "ГОСТ 33383-2015", "ГОСТ Р 56925-2016"),
+    "pavement": ("ГОСТ Р 59120-2021", "ГОСТ Р 71404-2024", "ГОСТ Р 70364-2022"),
     "organization": ("СП 48.13330.2019", "СП 70.13330.2012", "СП 68.13330.2017"),
     "structures": ("СП 20.13330.2016", "ГОСТ 27751-2014", "СП 63.13330.2018", "СП 16.13330.2017"),
     "geotechnics": ("СП 22.13330.2016", "СП 24.13330.2021", "СП 45.13330.2017"),
@@ -76,13 +78,16 @@ def catalog_overview() -> str:
 
 def search_catalog(query: str, limit: int = 8) -> list[dict]:
     profile = analyze_query(query)
+    compact_query = re.sub(r"[^0-9a-zа-яё]", "", normalize(query))
     scored = []
     for doc in documents():
         haystack = " ".join(
             str(doc.get(field, ""))
             for field in ("code", "title", "scope", "category")
         )
-        if not profile.categories and len(profile.stems) > 1:
+        compact_code = re.sub(r"[^0-9a-zа-яё]", "", normalize(doc["code"]))
+        exact_compact_code = len(compact_query) >= 4 and compact_query in compact_code
+        if not exact_compact_code and not profile.categories and len(profile.stems) > 1:
             document_stems = {stem_word(token) for token in tokenize(haystack)}
             matched_stems = sum(
                 1
@@ -102,6 +107,8 @@ def search_catalog(query: str, limit: int = 8) -> list[dict]:
         score = text_relevance(profile, haystack)
         normalized_code = normalize(doc["code"])
         score += sum(8.0 for token in profile.tokens if len(token) >= 2 and token in normalized_code)
+        if exact_compact_code:
+            score += 16.0
         if doc["category"] in profile.categories:
             score += 5.0
         if not profile.has_document_number:

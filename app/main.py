@@ -8,6 +8,7 @@ from fastapi import FastAPI, Header, HTTPException, Request
 from app.bot import create_dispatcher
 from app.catalog import documents
 from app.config import get_settings
+from app.requirements import requirement_values_count
 
 logging.basicConfig(level=logging.INFO)
 settings = get_settings()
@@ -32,6 +33,7 @@ async def health() -> dict[str, str | int]:
     return {
         "status": "ok",
         "documents": len(documents()),
+        "requirements": requirement_values_count(),
         "search": "local-hybrid",
         "release": "2026-08-29",
     }
