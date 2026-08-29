@@ -8,7 +8,12 @@ from pypdf import PdfReader
 from app.catalog import documents as catalog_documents
 
 
-SECTION_PATTERN = re.compile(r"(?m)^\s*((?:\d+\.)+\d+|\d+\.\d+)\s+")
+SECTION_PATTERN = re.compile(
+    r"(?mi)^\s*("
+    r"(?:(?:пункт|п\.)\s*)?(?:\d+\.)+\d+"
+    r"|(?:статья|раздел|таблица|приложение)\s+[0-9а-яa-zivx.-]+"
+    r")\s+"
+)
 
 
 def chunks(text: str, size: int = 1800, overlap: int = 250):
