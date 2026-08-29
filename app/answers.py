@@ -29,6 +29,20 @@ async def answer_question(api_key: str, model: str, question: str, hits: list[Se
             "Уточните вид здания, назначение помещения и применимый документ.\n\n"
             "Перед применением проверьте актуальность официальной редакции документа."
         )
+    if not api_key:
+        excerpts = []
+        for hit in hits[:5]:
+            source = hit.document
+            if hit.section:
+                source += f", пункт {hit.section}"
+            if hit.page:
+                source += f", стр. {hit.page}"
+            excerpts.append(f"• {hit.text[:500].strip()}\n[{source}]")
+        return (
+            "Нашёл подходящие фрагменты:\n\n"
+            + "\n\n".join(excerpts)
+            + "\n\nПеред применением проверьте актуальность официальной редакции документа."
+        )
     client = AsyncOpenAI(api_key=api_key)
     response = await client.responses.create(
         model=model,
