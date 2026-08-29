@@ -6,6 +6,7 @@ from aiogram.types import Update
 from fastapi import FastAPI, Header, HTTPException, Request
 
 from app.bot import create_dispatcher
+from app.catalog import documents
 from app.config import get_settings
 
 logging.basicConfig(level=logging.INFO)
@@ -27,8 +28,13 @@ app = FastAPI(title="СтройНорм РФ", lifespan=lifespan)
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, str | int]:
+    return {
+        "status": "ok",
+        "documents": len(documents()),
+        "search": "local-hybrid",
+        "release": "2026-08-29",
+    }
 
 
 @app.post("/telegram/webhook")
