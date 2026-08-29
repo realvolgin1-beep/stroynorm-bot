@@ -6,7 +6,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from app.answers import answer_question
-from app.catalog import catalog_summary, documents
+from app.catalog import catalog_summary, documents, format_catalog_hits, search_catalog
 from app.config import Settings
 from app.search import search
 
@@ -50,8 +50,14 @@ async def help_message(message: Message) -> None:
 
 
 @router.message(F.text == "🔎 Найти норму")
+@router.message(Command("search"))
 async def find_prompt(message: Message) -> None:
-    await message.answer("Напишите, какую строительную норму нужно найти.")
+    await message.answer(
+        "Напишите обозначение или вопрос. Например:\n"
+        "• СП 35.13330\n• ГОСТ по обследованию мостов\n"
+        "• допустимое отклонение поперечного уклона дороги\n"
+        "• установка временных знаков при ремонте"
+    )
 
 
 @router.message(Command("documents"))
@@ -88,13 +94,20 @@ async def pavement(message: Message) -> None:
 @router.message(F.text)
 async def question(message: Message, settings: Settings) -> None:
     text = (message.text or "").strip()
-    if len(text) < 8:
-        await message.answer("Пожалуйста, сформулируйте вопрос подробнее.")
+    catalog_hits = search_catalog(text)
+    if len(text) < 8 and catalog_hits:
+        await message.answer(format_catalog_hits(catalog_hits))
+        return
+    if len(text) < 4:
+        await message.answer("Введите обозначение документа или более подробный вопрос.")
         return
     waiting = await message.answer("Ищу норму в базе…")
     try:
         hits = await asyncio.to_thread(search, settings.database_path, text)
-        response = await answer_question(settings.openai_api_key, settings.openai_model, text, hits)
+        if not hits and catalog_hits:
+            response = format_catalog_hits(catalog_hits)
+        else:
+            response = await answer_question(settings.openai_api_key, settings.openai_model, text, hits)
         await waiting.edit_text(response)
     except Exception:
         logger.exception("Failed to answer question")
