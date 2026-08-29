@@ -6,6 +6,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from app.answers import answer_question
+from app.catalog import catalog_summary, documents
 from app.config import Settings
 from app.search import search
 
@@ -14,7 +15,8 @@ router = Router()
 
 MENU = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="🔎 Найти норму"), KeyboardButton(text="📚 О базе")],
+        [KeyboardButton(text="🔎 Найти норму"), KeyboardButton(text="📚 Документы")],
+        [KeyboardButton(text="🌉 Мосты"), KeyboardButton(text="🛣 Дороги и знаки")],
         [KeyboardButton(text="ℹ️ Помощь")],
     ],
     resize_keyboard=True,
@@ -51,11 +53,25 @@ async def find_prompt(message: Message) -> None:
     await message.answer("Напишите, какую строительную норму нужно найти.")
 
 
-@router.message(F.text == "📚 О базе")
-async def about_database(message: Message, settings: Settings) -> None:
-    hits = search(settings.database_path, "строительство", limit=1)
-    status = "База подключена." if hits else "Нормативные документы пока не загружены."
-    await message.answer(f"{status}\nОтветы формируются только по проиндексированным документам.")
+@router.message(Command("documents"))
+@router.message(F.text == "📚 Документы")
+async def about_database(message: Message) -> None:
+    await message.answer(catalog_summary())
+
+
+@router.message(Command("stats"))
+async def stats(message: Message) -> None:
+    await message.answer(f"В реестре: {len(documents())} документов. Приоритет: дороги, мосты, знаки, контроль и приёмка.")
+
+
+@router.message(F.text == "🌉 Мосты")
+async def bridges(message: Message) -> None:
+    await message.answer(catalog_summary("bridges"))
+
+
+@router.message(F.text == "🛣 Дороги и знаки")
+async def roads(message: Message) -> None:
+    await message.answer(catalog_summary("roads") + "\n\n" + catalog_summary("traffic"))
 
 
 @router.message(F.text)
