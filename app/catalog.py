@@ -1,91 +1,152 @@
 import json
-import re
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
+from urllib.parse import quote_plus
+
+from app.smart_search import analyze_query, normalize, stem_word, text_relevance, tokenize
 
 
 CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "catalog.json"
 
+CATEGORY_NAMES = {
+    "roads": "Автомобильные дороги",
+    "bridges": "Мосты и трубы",
+    "traffic": "Знаки и организация движения",
+    "acceptance": "Контроль и приёмка",
+    "maintenance": "Эксплуатация и содержание",
+    "rosavtodor": "Минтранс и Росавтодор",
+    "measurements": "Измерения и допустимые отклонения",
+    "pavement": "Дорожные одежды и покрытия",
+    "organization": "Организация строительства",
+    "structures": "Строительные конструкции и материалы",
+    "geotechnics": "Основания, фундаменты и земляные работы",
+    "fire": "Пожарная безопасность",
+    "buildings": "Жилые, общественные и производственные здания",
+    "engineering": "Инженерные системы",
+    "finishes": "Кровли, изоляция, отделка и защита",
+    "documentation": "Проектная и рабочая документация",
+    "survey": "Изыскания, геодезия и обследования",
+    "accessibility": "Доступность для МГН",
+    "physics": "Строительная физика и климат",
+    "urban": "Градостроительство и планировка",
+}
+
+DOCUMENT_PRIORITIES = {
+    "bridges": ("СП 35.13330.2011", "ГОСТ 33384-2015", "ГОСТ Р 59618-2021", "СП 79.13330.2012"),
+    "roads": ("СП 34.13330.2021",),
+    "traffic": ("ГОСТ Р 52289-2019", "ГОСТ 32758-2014", "ГОСТ Р 52290-2004"),
+    "measurements": ("ГОСТ Р 58945-2020", "ГОСТ 33383-2015", "ГОСТ Р 56925-2016"),
+    "organization": ("СП 48.13330.2019", "СП 70.13330.2012", "СП 68.13330.2017"),
+    "structures": ("СП 20.13330.2016", "ГОСТ 27751-2014", "СП 63.13330.2018", "СП 16.13330.2017"),
+    "geotechnics": ("СП 22.13330.2016", "СП 24.13330.2021", "СП 45.13330.2017"),
+    "fire": ("СП 1.13130.2020", "СП 2.13130.2020", "СП 4.13130.2013", "СП 8.13130.2020"),
+    "engineering": ("СП 60.13330.2020", "СП 73.13330.2016", "СП 30.13330.2020"),
+    "documentation": ("ГОСТ Р 21.101-2026", "ГОСТ 21.501-2018"),
+    "survey": ("ГОСТ 31937-2024", "СП 47.13330.2016", "СП 126.13330.2017"),
+    "accessibility": ("СП 59.13330.2020",),
+    "physics": ("СП 50.13330.2024", "СП 131.13330.2025", "СП 52.13330.2016", "СП 51.13330.2011"),
+    "urban": ("СП 42.13330.2026",),
+}
+
 
 @lru_cache
-def documents() -> list[dict[str, str]]:
+def documents() -> list[dict]:
     return json.loads(CATALOG_PATH.read_text(encoding="utf-8"))
 
 
 def catalog_summary(category: str | None = None) -> str:
-    names = {
-        "roads": "Автомобильные дороги",
-        "bridges": "Мосты и трубы",
-        "traffic": "Знаки и организация движения",
-        "acceptance": "Контроль и приёмка",
-        "maintenance": "Эксплуатация и содержание",
-        "rosavtodor": "Минтранс и Росавтодор",
-        "measurements": "Измерения и допустимые отклонения",
-        "pavement": "Дорожные одежды и покрытия",
-    }
     selected = [doc for doc in documents() if not category or doc["category"] == category]
-    lines = [f"📚 {names.get(category, 'Реестр нормативных документов')} — {len(selected)} документов"]
+    lines = [f"📚 {CATEGORY_NAMES.get(category, 'Реестр нормативных документов')} — {len(selected)} документов"]
     for doc in selected:
         scope = f"\nПрименение: {doc['scope']}" if doc.get("scope") else ""
         lines.append(f"\n• {doc['code']}\n{doc['title']}\nСтатус: {doc['status']}; {doc['edition']}{scope}")
     return "\n".join(lines)
 
 
-def search_catalog(query: str, limit: int = 8) -> list[dict[str, str]]:
-    normalized = query.lower().replace("ё", "е")
-    terms = re.findall(r"[0-9a-zа-я.-]{2,}", normalized)
-    aliases = {
-        "мост": ["мост", "труб", "пролет", "опор", "сооружен"],
-        "пролет": ["мост", "труб", "пролет", "опор", "сооружен"],
-        "опор": ["мост", "труб", "пролет", "опор", "сооружен"],
-        "усто": ["мост", "труб", "пролет", "опор", "сооружен"],
-        "балк": ["мост", "пролет", "конструкц", "сооружен"],
-        "ферм": ["мост", "пролет", "конструкц", "сооружен"],
-        "ригел": ["мост", "опор", "конструкц", "сооружен"],
-        "деформацион": ["мост", "пролет", "конструкц", "сооружен"],
-        "дорог": ["дорог", "покрыт", "одежд", "полотн"],
-        "знак": ["знак", "движен", "размет", "светофор"],
-        "допуск": ["отклон", "геометр", "контрол", "измерен", "приемк"],
-        "асфальт": ["асфальт", "покрыт", "смес"],
-    }
-    expanded = list(terms)
-    for term in terms:
-        for key, values in aliases.items():
-            if term.startswith(key):
-                expanded.extend(values)
-    expanded = list(dict.fromkeys(expanded))
+def catalog_overview() -> str:
+    counts = Counter(doc["category"] for doc in documents())
+    lines = [f"📚 В проверенном реестре: {len(documents())} документов."]
+    for category, title in CATEGORY_NAMES.items():
+        if counts[category]:
+            lines.append(f"• {title}: {counts[category]}")
+    lines.append("\nНапишите тему или обозначение документа. Бот подберёт карточки и официальные ссылки.")
+    return "\n".join(lines)
 
-    has_document_number = any(re.search(r"\d{4,}", term) for term in terms)
-    bridge_query = any(
-        term.startswith(("мост", "пролет", "опор", "усто", "балк", "ферм", "ригел", "деформацион"))
-        for term in terms
-    )
-    topic_boosts = {}
-    if bridge_query and not has_document_number:
-        topic_boosts = {
-            "СП 35.13330.2011": 8,
-            "ГОСТ 33384-2015": 7,
-            "ГОСТ Р 59618-2021": 4,
-            "СП 79.13330.2012": 3,
-        }
 
+def search_catalog(query: str, limit: int = 8) -> list[dict]:
+    profile = analyze_query(query)
     scored = []
     for doc in documents():
-        haystack = " ".join(str(value) for value in doc.values()).lower().replace("ё", "е")
-        score = sum(3 if term in doc["code"].lower() else 1 for term in expanded if term in haystack)
-        score += topic_boosts.get(doc["code"], 0)
-        if score:
+        haystack = " ".join(
+            str(doc.get(field, ""))
+            for field in ("code", "title", "scope", "category")
+        )
+        if not profile.categories and len(profile.stems) > 1:
+            document_stems = {stem_word(token) for token in tokenize(haystack)}
+            matched_stems = sum(
+                1
+                for query_stem in profile.stems
+                if any(
+                    query_stem == document_stem
+                    or (
+                        len(query_stem) >= 4
+                        and len(document_stem) >= 4
+                        and (query_stem.startswith(document_stem) or document_stem.startswith(query_stem))
+                    )
+                    for document_stem in document_stems
+                )
+            )
+            if matched_stems <= len(profile.stems) // 2:
+                continue
+        score = text_relevance(profile, haystack)
+        normalized_code = normalize(doc["code"])
+        score += sum(8.0 for token in profile.tokens if len(token) >= 2 and token in normalized_code)
+        if doc["category"] in profile.categories:
+            score += 5.0
+        if not profile.has_document_number:
+            for category in profile.categories:
+                priorities = DOCUMENT_PRIORITIES.get(category, ())
+                if doc["code"] in priorities:
+                    score += 3.2 / (priorities.index(doc["code"]) + 1)
+        if score >= 0.75:
             scored.append((score, doc))
     scored.sort(key=lambda item: (-item[0], item[1]["code"]))
     return [doc for _, doc in scored[:limit]]
 
 
-def format_catalog_hits(hits: list[dict[str, str]]) -> str:
-    lines = ["Нашёл подходящие нормативные документы:"]
+def format_catalog_hits(hits: list[dict]) -> str:
+    lines = ["🧠 Бесплатный гибридный поиск нашёл подходящие документы:"]
     for doc in hits:
         lines.append(f"\n• {doc['code']} — {doc['title']}\nСтатус: {doc['status']}")
         if doc.get("scope"):
             lines.append(f"Применение: {doc['scope']}")
-        lines.append(f"Источник: {doc['official_url']}")
-    lines.append("\nУточните нужную работу или параметр: установка знака, ровность, уклон, сцепление, опора, пролетное строение, приемка и т. п.")
+        lines.append(f"Официальная карточка: {doc['official_url']}")
+    lines.append(
+        "\nРекомендация: уточните вид работ, конструктивный элемент и параметр. "
+        "Точные значения и пункты бот показывает только из загруженного официального текста."
+    )
     return "\n".join(lines)
+
+
+def format_no_results(query: str) -> str:
+    gost_search = f"https://protect.gost.ru/?search={quote_plus(query)}"
+    sp_search = f"https://protect.gost.ru/sp/?search={quote_plus(query)}"
+    return (
+        "В локальном реестре нет надёжного совпадения. Проверьте обозначение в официальном фонде:\n"
+        f"• ГОСТ/ГОСТ Р: {gost_search}\n"
+        f"• Своды правил: {sp_search}\n\n"
+        "Добавьте объект, вид работ и нужный параметр."
+    )
+
+
+def catalog_sources() -> str:
+    return (
+        "🔗 Основные источники базы:\n\n"
+        "• Федеральный информационный фонд стандартов Росстандарта:\nhttps://protect.gost.ru/\n\n"
+        "• Документы Минстроя России:\nhttps://minstroyrf.gov.ru/docs/\n\n"
+        "• Официальное опубликование правовых актов:\nhttps://publication.pravo.gov.ru/\n\n"
+        "• ОДМ Росавтодора:\n"
+        "https://rosavtodor.gov.ru/about/upravlenie-fda/upravlenie-nauchno-tekhnicheskikh-issledovaniy--i-informatsionnykh-tekhnologiy/tehnicheskoe-regulirovanie/otraslevye-dorozhnye-metodicheskie-dokumenty\n\n"
+        "Перед применением проверяйте статус, изменения и дату введения документа."
+    )
