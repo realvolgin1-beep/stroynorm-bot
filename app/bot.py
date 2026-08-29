@@ -17,6 +17,7 @@ MENU = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text="🔎 Найти норму"), KeyboardButton(text="📚 Документы")],
         [KeyboardButton(text="🌉 Мосты"), KeyboardButton(text="🛣 Дороги и знаки")],
+        [KeyboardButton(text="📐 Допуски и контроль"), KeyboardButton(text="🧱 Покрытия")],
         [KeyboardButton(text="ℹ️ Помощь")],
     ],
     resize_keyboard=True,
@@ -72,6 +73,16 @@ async def bridges(message: Message) -> None:
 @router.message(F.text == "🛣 Дороги и знаки")
 async def roads(message: Message) -> None:
     await message.answer(catalog_summary("roads") + "\n\n" + catalog_summary("traffic"))
+
+
+@router.message(F.text == "📐 Допуски и контроль")
+async def measurements(message: Message) -> None:
+    await message.answer(catalog_summary("measurements") + "\n\n" + catalog_summary("acceptance"))
+
+
+@router.message(F.text == "🧱 Покрытия")
+async def pavement(message: Message) -> None:
+    await message.answer(catalog_summary("pavement"))
 
 
 @router.message(F.text)
