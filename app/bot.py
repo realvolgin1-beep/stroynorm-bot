@@ -104,12 +104,17 @@ async def sources(message: Message) -> None:
 
 
 @router.message(Command("stats"))
-async def stats(message: Message) -> None:
+async def stats(message: Message, settings: Settings) -> None:
+    answer_engine = (
+        f"OpenAI {settings.openai_model} по найденным нормативным фрагментам"
+        if settings.openai_api_key
+        else "локальный проверенный ответ"
+    )
     await message.answer(
         f"В проверенном реестре: {len(documents())} документов. "
         f"Тематический поиск работает по {catalog_scope_count()} областям применения. "
         f"В отдельной базе: {requirement_values_count()} проверенных численных значений. "
-        "Поиск: бесплатный локальный гибридный — ключ OpenAI не требуется."
+        f"Поиск: локальный гибридный. Формирование ответа: {answer_engine}."
     )
 
 

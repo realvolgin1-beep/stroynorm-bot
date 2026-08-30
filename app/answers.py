@@ -10,12 +10,58 @@ logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """Ты — справочный помощник по строительным СП и ГОСТам РФ.
-Отвечай только на основании переданных фрагментов нормативных документов.
-Не придумывай нормы, номера пунктов, значения и статусы документов.
-Если данных недостаточно, прямо скажи об этом и предложи уточнить запрос.
-Для каждого существенного утверждения укажи источник в формате [Документ, пункт, стр.].
-Отделяй обязательное требование от рекомендации. В конце всегда добавляй:
-«Перед применением проверьте актуальность официальной редакции документа.»"""
+Переданные нормативные фрагменты — единственный источник фактов для ответа.
+Не используй знания модели для численных норм, не придумывай значения, документы,
+редакции, пункты, таблицы, страницы и ссылки.
+
+Сначала дай прямой ответ на вопрос. Для допуска или отклонения укажи:
+1) численное значение и единицу измерения;
+2) условия применения;
+3) способ контроля;
+4) норматив, пункт или таблицу и страницу.
+Каждое численное утверждение сопровождай ссылкой вида [Документ, пункт/таблица, стр.].
+Отделяй обязательное требование от рекомендации. Если подтверждающего фрагмента
+недостаточно, прямо скажи, какого параметра или условия не хватает, и не называй число.
+Не составляй отдельный список веб-ссылок: приложение добавит проверенные ссылки само.
+В конце добавь: «Перед применением проверьте актуальность официальной редакции документа.»"""
+
+
+def _citation(hit: SearchHit) -> str:
+    citation = hit.document
+    if hit.section:
+        citation += f", {_section_label(hit.section)}"
+    if hit.page:
+        citation += f", стр. {hit.page}"
+    return citation
+
+
+def _source_footer(hits: list[SearchHit]) -> str:
+    lines = ["🔗 Проверенные источники:"]
+    seen = set()
+    for hit in hits:
+        key = (hit.document, hit.section, hit.page, hit.source_url)
+        if key in seen:
+            continue
+        seen.add(key)
+        line = f"• {_citation(hit)}"
+        if hit.source_url:
+            line += f"\n  {hit.source_url}"
+        lines.append(line)
+        if len(lines) >= 5:
+            break
+    return "\n".join(lines)
+
+
+def _with_source_footer(answer: str, hits: list[SearchHit], limit: int = 4090) -> str:
+    footer = _source_footer(hits)
+    separator = "\n\n"
+    available = limit - len(separator) - len(footer)
+    if available < 200:
+        return footer[:limit]
+    body = answer.strip()
+    if len(body) > available:
+        body = body[: available - 1].rstrip(" ,;:-") + "…"
+    return f"{body}{separator}{footer}"
 
 
 def _section_label(section: str) -> str:
@@ -167,15 +213,20 @@ async def answer_question(api_key: str, model: str, question: str, hits: list[Se
     try:
         from openai import AsyncOpenAI
 
-        client = AsyncOpenAI(api_key=api_key, timeout=18.0, max_retries=0)
+        client = AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=1)
         response = await client.responses.create(
             model=model,
             instructions=SYSTEM_PROMPT,
-            input=f"Вопрос пользователя:\n{question}\n\nФрагменты базы:\n{_context(clause_hits)}",
-            temperature=0.1,
-            max_output_tokens=900,
+            input=f"Вопрос пользователя:\n{question}\n\nФрагменты базы:\n{_context(clause_hits[:6])}",
+            reasoning={"effort": "low"},
+            text={"verbosity": "low"},
+            max_output_tokens=700,
+            store=False,
         )
-        return response.output_text.strip()
+        generated = response.output_text.strip()
+        if not generated:
+            raise ValueError("OpenAI returned an empty answer")
+        return _with_source_footer(generated, clause_hits)
     except Exception as error:
         logger.warning("External answer generation unavailable; using free local answer: %s", type(error).__name__)
         return local_answer(question, hits)

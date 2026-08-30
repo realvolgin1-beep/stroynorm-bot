@@ -36,7 +36,8 @@ async def health() -> dict[str, str | int]:
         "searchable_scopes": catalog_scope_count(),
         "requirements": requirement_values_count(),
         "search": "local-hybrid-grounded",
-        "release": "2026-08-30",
+        "answer_model": settings.openai_model,
+        "release": "2026-08-30-luna",
     }
 
 
