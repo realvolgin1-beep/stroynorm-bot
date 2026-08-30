@@ -30,8 +30,8 @@ def _stems(text: str) -> tuple[str, ...]:
 def _same_stem(actual: str, expected: str) -> bool:
     if actual == expected:
         return True
-    short_actual = actual.rstrip("ьияыа")
-    short_expected = expected.rstrip("ьияыа")
+    short_actual = actual.rstrip("ьйияыа")
+    short_expected = expected.rstrip("ьйияыа")
     if len(short_actual) >= 2 and short_actual == short_expected:
         return True
     if len(actual) < 4 or len(expected) < 4:

@@ -75,6 +75,13 @@ def test_specific_steel_column_support_section_filters_variants():
     assert "Σh/(200√n)" not in answer
 
 
+def test_plural_steel_beams_query_matches_tolerances():
+    answer = answer_requirement("монтаж стальных балок")
+    assert answer is not None
+    assert "СП 70.13330.2012" in answer
+    assert "таблица 4.9" in answer
+
+
 def test_precast_column_verticality_returns_length_ranges():
     answer = answer_requirement("вертикальность сборной жб колонны одноэтажного здания")
     assert answer is not None
@@ -118,6 +125,12 @@ def test_rebar_cover_uses_both_dimensions():
     answer = answer_requirement("защитный слой 20 мм сечение 300 мм допуск")
     assert answer is not None
     assert "+10 / −3 мм" in answer
+    assert "таблица 5.10, позиция 7" in answer
+
+
+def test_rebar_cover_genitive_form_is_understood():
+    answer = answer_requirement("допуск защитного слоя бетона")
+    assert answer is not None
     assert "таблица 5.10, позиция 7" in answer
 
 
