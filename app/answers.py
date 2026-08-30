@@ -10,9 +10,14 @@ logger = logging.getLogger(__name__)
 
 
 SYSTEM_PROMPT = """Ты — справочный помощник по строительным СП и ГОСТам РФ.
-Переданные нормативные фрагменты — единственный источник фактов для ответа.
+Переданные фрагменты и карточки документов — единственный источник фактов для ответа.
 Не используй знания модели для численных норм, не придумывай значения, документы,
 редакции, пункты, таблицы, страницы и ссылки.
+
+Фрагмент пункта может подтверждать конкретное требование. Карточка документа подтверждает
+только его название, область применения, статус и ссылку; она не подтверждает численные
+значения или конкретные пункты. Если переданы только карточки, дай полезную качественную
+ориентировку по применимым документам и попроси недостающие условия, но не называй допуск.
 
 Сначала дай прямой ответ на вопрос. Для допуска или отклонения укажи:
 1) численное значение и единицу измерения;
@@ -74,12 +79,28 @@ def _section_label(section: str) -> str:
 def _context(hits: list[SearchHit]) -> str:
     blocks = []
     for index, hit in enumerate(hits, 1):
+        evidence_type = "Фрагмент нормативного пункта" if hit.kind == "clause" else "Карточка документа"
         location = f"стр. {hit.page}" if hit.page else "страница не определена"
         if hit.section:
             location += f", {_section_label(hit.section)}"
         source = f"\nОфициальный источник: {hit.source_url}" if hit.source_url else ""
-        blocks.append(f"Фрагмент {index}\nДокумент: {hit.document}\n{location}{source}\n{hit.text}")
+        blocks.append(
+            f"Источник {index}\nТип: {evidence_type}\nДокумент: {hit.document}\n"
+            f"{location}{source}\n{hit.text}"
+        )
     return "\n\n".join(blocks)
+
+
+def _is_quantitative_question(question: str) -> bool:
+    normalized = question.lower().replace("ё", "е")
+    return any(
+        marker in normalized
+        for marker in (
+            "сколько", "допуск", "отклон", "размер", "толщин", "высот", "ширин",
+            "длин", "расстояни", "уклон", "шаг", "срок", "температур", "расход",
+            "нагрузк", "усили", "процент", "мм", "см", "метр",
+        )
+    )
 
 
 def _catalog_answer(question: str, hits: list[SearchHit]) -> str:
@@ -107,14 +128,7 @@ def _catalog_answer(question: str, hits: list[SearchHit]) -> str:
             block += f"\nОфициальная карточка: {hit.source_url}"
         blocks.append(block)
 
-    quantitative = any(
-        marker in question.lower().replace("ё", "е")
-        for marker in (
-            "сколько", "допуск", "отклон", "размер", "толщин", "высот", "ширин",
-            "длин", "расстояни", "уклон", "шаг", "срок", "температур", "расход",
-            "нагрузк", "усили", "процент", "мм", "см", "метр",
-        )
-    )
+    quantitative = _is_quantitative_question(question)
     if quantitative:
         blocks.append(
             "\nТочное значение и номер пункта не называю: по этому вопросу сейчас найдена "
@@ -204,29 +218,83 @@ def local_answer(question: str, hits: list[SearchHit]) -> str:
     return answer[:4000]
 
 
-async def answer_question(api_key: str, model: str, question: str, hits: list[SearchHit]) -> str:
+async def _generate_openai(api_key: str, model: str, prompt: str) -> str:
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=1)
+    response = await client.responses.create(
+        model=model,
+        instructions=SYSTEM_PROMPT,
+        input=prompt,
+        reasoning={"effort": "low"},
+        text={"verbosity": "low"},
+        max_output_tokens=700,
+        store=False,
+    )
+    return response.output_text.strip()
+
+
+async def _generate_groq(api_key: str, model: str, fallback_model: str, prompt: str) -> str:
+    from openai import AsyncOpenAI
+
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url="https://api.groq.com/openai/v1",
+        timeout=30.0,
+        max_retries=0,
+    )
+    models = list(dict.fromkeys(candidate for candidate in (model, fallback_model) if candidate))
+    last_error: Exception | None = None
+    for candidate in models:
+        try:
+            response = await client.chat.completions.create(
+                model=candidate,
+                messages=[
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+                max_completion_tokens=700,
+            )
+            return (response.choices[0].message.content or "").strip()
+        except Exception as error:
+            last_error = error
+            logger.warning("Groq model %s unavailable: %s", candidate, type(error).__name__)
+    if last_error:
+        raise last_error
+    raise ValueError("No Groq model configured")
+
+
+async def answer_question(
+    api_key: str,
+    model: str,
+    question: str,
+    hits: list[SearchHit],
+    *,
+    provider: str = "openai",
+    fallback_model: str = "",
+) -> str:
     if not hits:
         return local_answer(question, hits)
     clause_hits = [hit for hit in hits if hit.kind == "clause"]
-    if not api_key or not clause_hits:
+    if not api_key:
         return local_answer(question, hits)
+    if not clause_hits and _is_quantitative_question(question):
+        return local_answer(question, hits)
+    evidence_hits = clause_hits[:6] if clause_hits else [hit for hit in hits if hit.kind == "catalog"][:5]
+    prompt = f"Вопрос пользователя:\n{question}\n\nДанные нормативной базы:\n{_context(evidence_hits)}"
     try:
-        from openai import AsyncOpenAI
-
-        client = AsyncOpenAI(api_key=api_key, timeout=30.0, max_retries=1)
-        response = await client.responses.create(
-            model=model,
-            instructions=SYSTEM_PROMPT,
-            input=f"Вопрос пользователя:\n{question}\n\nФрагменты базы:\n{_context(clause_hits[:6])}",
-            reasoning={"effort": "low"},
-            text={"verbosity": "low"},
-            max_output_tokens=700,
-            store=False,
-        )
-        generated = response.output_text.strip()
+        if provider == "groq":
+            generated = await _generate_groq(api_key, model, fallback_model, prompt)
+        else:
+            generated = await _generate_openai(api_key, model, prompt)
         if not generated:
-            raise ValueError("OpenAI returned an empty answer")
-        return _with_source_footer(generated, clause_hits)
+            raise ValueError(f"{provider} returned an empty answer")
+        return _with_source_footer(generated, evidence_hits)
     except Exception as error:
-        logger.warning("External answer generation unavailable; using free local answer: %s", type(error).__name__)
+        logger.warning(
+            "%s answer generation unavailable; using free local answer: %s",
+            provider,
+            type(error).__name__,
+        )
         return local_answer(question, hits)

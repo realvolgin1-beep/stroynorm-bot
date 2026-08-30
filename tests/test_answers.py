@@ -124,3 +124,167 @@ def test_openai_failure_falls_back_to_grounded_local_answer(monkeypatch):
 
     assert "Бесплатный локальный поиск" in answer
     assert "https://protect.gost.ru/document/example" in answer
+
+
+def test_groq_answer_uses_free_primary_model_and_appends_source(monkeypatch):
+    captured = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Монтаж выполняют по проекту производства работ."
+                        )
+                    )
+                ]
+            )
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            captured["client"] = kwargs
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI))
+    hit = SearchHit(
+        document="СП 70.13330.2012",
+        page=42,
+        section="5.1.3",
+        text="Монтаж конструкций выполняют в соответствии с проектом производства работ.",
+        score=5.0,
+        source_url="https://protect.gost.ru/document/example",
+    )
+
+    answer = asyncio.run(
+        answer_question(
+            "gsk-test",
+            "qwen/qwen3.8-27b",
+            "Как выполнять монтаж колонн?",
+            [hit],
+            provider="groq",
+            fallback_model="openai/gpt-oss-120b",
+        )
+    )
+
+    assert captured["client"]["base_url"] == "https://api.groq.com/openai/v1"
+    assert captured["model"] == "qwen/qwen3.8-27b"
+    assert captured["temperature"] == 0.1
+    assert captured["max_completion_tokens"] == 700
+    assert "🔗 Проверенные источники" in answer
+    assert "https://protect.gost.ru/document/example" in answer
+
+
+def test_groq_tries_fallback_model_after_primary_failure(monkeypatch):
+    attempted = []
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            attempted.append(kwargs["model"])
+            if len(attempted) == 1:
+                raise RuntimeError("primary unavailable")
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(content="Ответ по подтверждённому фрагменту.")
+                    )
+                ]
+            )
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI))
+    hit = SearchHit("СП 70.13330.2012", 42, "5.1.3", "Подтверждённый текст пункта.", 5.0)
+
+    answer = asyncio.run(
+        answer_question(
+            "gsk-test",
+            "qwen/qwen3.8-27b",
+            "Как выполнять монтаж?",
+            [hit],
+            provider="groq",
+            fallback_model="openai/gpt-oss-120b",
+        )
+    )
+
+    assert attempted == ["qwen/qwen3.8-27b", "openai/gpt-oss-120b"]
+    assert "Ответ по подтверждённому фрагменту" in answer
+
+
+def test_quantitative_catalog_question_never_calls_external_model(monkeypatch):
+    class ForbiddenAsyncOpenAI:
+        def __init__(self, **kwargs):
+            raise AssertionError("external model must not be called")
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=ForbiddenAsyncOpenAI))
+    hit = SearchHit(
+        document="СП 70.13330.2012",
+        page=None,
+        section="область применения",
+        text="Монтаж несущих конструкций.",
+        score=5.0,
+        source_url="https://protect.gost.ru/document/example",
+        kind="catalog",
+    )
+
+    answer = asyncio.run(
+        answer_question(
+            "gsk-test",
+            "qwen/qwen3.8-27b",
+            "Какой допуск отклонения колонны?",
+            [hit],
+            provider="groq",
+        )
+    )
+
+    assert "Точное значение и номер пункта не называю" in answer
+    assert "±" not in answer
+
+
+def test_qualitative_catalog_question_can_use_groq(monkeypatch):
+    captured = {}
+
+    class FakeCompletions:
+        async def create(self, **kwargs):
+            captured.update(kwargs)
+            return SimpleNamespace(
+                choices=[
+                    SimpleNamespace(
+                        message=SimpleNamespace(
+                            content="Для монтажа колонн применяют требования указанного СП и ППР."
+                        )
+                    )
+                ]
+            )
+
+    class FakeAsyncOpenAI:
+        def __init__(self, **kwargs):
+            self.chat = SimpleNamespace(completions=FakeCompletions())
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(AsyncOpenAI=FakeAsyncOpenAI))
+    hit = SearchHit(
+        document="СП 70.13330.2012",
+        page=None,
+        section="область применения",
+        text="Производство и приёмка работ по монтажу несущих конструкций.",
+        score=5.0,
+        source_url="https://protect.gost.ru/document/example",
+        kind="catalog",
+    )
+
+    answer = asyncio.run(
+        answer_question(
+            "gsk-test",
+            "qwen/qwen3.8-27b",
+            "Расскажи про монтаж колонн",
+            [hit],
+            provider="groq",
+        )
+    )
+
+    assert "Карточка документа" in captured["messages"][1]["content"]
+    assert "Для монтажа колонн" in answer
+    assert "https://protect.gost.ru/document/example" in answer

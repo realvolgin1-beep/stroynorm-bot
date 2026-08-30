@@ -6,6 +6,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 class Settings(BaseSettings):
     telegram_bot_token: str
+    groq_api_key: str = ""
+    groq_model: str = "qwen/qwen3.8-27b"
+    groq_fallback_model: str = "openai/gpt-oss-120b"
     openai_api_key: str = ""
     openai_model: str = "gpt-5.6-luna"
     public_url: str = ""
@@ -25,6 +28,34 @@ class Settings(BaseSettings):
     @property
     def effective_public_url(self) -> str:
         return self.public_url or self.render_external_url
+
+    @property
+    def answer_provider(self) -> str:
+        if self.groq_api_key:
+            return "groq"
+        if self.openai_api_key:
+            return "openai"
+        return "local"
+
+    @property
+    def answer_api_key(self) -> str:
+        if self.answer_provider == "groq":
+            return self.groq_api_key
+        if self.answer_provider == "openai":
+            return self.openai_api_key
+        return ""
+
+    @property
+    def answer_model(self) -> str:
+        if self.answer_provider == "groq":
+            return self.groq_model
+        if self.answer_provider == "openai":
+            return self.openai_model
+        return "local-grounded"
+
+    @property
+    def answer_fallback_model(self) -> str:
+        return self.groq_fallback_model if self.answer_provider == "groq" else ""
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 

@@ -105,11 +105,12 @@ async def sources(message: Message) -> None:
 
 @router.message(Command("stats"))
 async def stats(message: Message, settings: Settings) -> None:
-    answer_engine = (
-        f"OpenAI {settings.openai_model} по найденным нормативным фрагментам"
-        if settings.openai_api_key
-        else "локальный проверенный ответ"
-    )
+    if settings.answer_provider == "groq":
+        answer_engine = f"бесплатный Groq {settings.answer_model} по найденным нормативным данным"
+    elif settings.answer_provider == "openai":
+        answer_engine = f"OpenAI {settings.answer_model} по найденным нормативным данным"
+    else:
+        answer_engine = "локальный проверенный ответ"
     await message.answer(
         f"В проверенном реестре: {len(documents())} документов. "
         f"Тематический поиск работает по {catalog_scope_count()} областям применения. "
@@ -175,7 +176,14 @@ async def question(message: Message, settings: Settings) -> None:
         if not hits:
             response = format_catalog_hits(catalog_hits) if catalog_hits else format_no_results(text)
         else:
-            response = await answer_question(settings.openai_api_key, settings.openai_model, text, hits)
+            response = await answer_question(
+                settings.answer_api_key,
+                settings.answer_model,
+                text,
+                hits,
+                provider=settings.answer_provider,
+                fallback_model=settings.answer_fallback_model,
+            )
         await waiting.edit_text(response)
     except Exception:
         logger.exception("Failed to answer question")
